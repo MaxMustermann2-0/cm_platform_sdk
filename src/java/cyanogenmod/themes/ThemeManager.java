@@ -16,12 +16,14 @@
 
 package cyanogenmod.themes;
 
+import android.content.ContentResolver;
 import android.content.Context;
 import android.os.Handler;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.provider.Settings;
 import android.util.ArraySet;
 import android.util.Log;
 
@@ -43,12 +45,14 @@ public class ThemeManager {
     private static IThemeService sService;
     private static ThemeManager sInstance;
     private static Handler mHandler;
+    private Context mContext;
 
     private Set<ThemeChangeListener> mChangeListeners = new ArraySet<>();
 
     private Set<ThemeProcessingListener> mProcessingListeners = new ArraySet<>();
 
     private ThemeManager(Context context) {
+        mContext = context;
         sService = getService();
         if (context.getPackageManager().hasSystemFeature(
                 CMContextConstants.Features.THEMES) && sService == null) {
@@ -302,6 +306,19 @@ public class ThemeManager {
     public void requestThemeChange(ThemeChangeRequest request, boolean removePerAppThemes) {
         try {
             sService.requestThemeChange(request, removePerAppThemes);
+            ContentResolver contentResolver = mContext.getContentResolver();
+            Settings.System.putString(contentResolver, "theme_current_overlay",
+                    request.getOverlayThemePackageName());
+            Settings.System.putString(contentResolver, "theme_current_icons",
+                    request.getIconsThemePackageName());
+            Settings.System.putString(contentResolver, "theme_current_status",
+                    request.getStatusBarThemePackageName());
+            Settings.System.putString(contentResolver, "theme_current_nav",
+                    request.getNavBarThemePackageName());
+            Settings.System.putString(contentResolver, "theme_current_wallpaper",
+                    request.getWallpaperThemePackageName());
+            Settings.System.putString(contentResolver, "theme_current_lockscreen",
+                    request.getLockWallpaperThemePackageName());
         } catch (RemoteException e) {
             logThemeServiceException(e);
         }
