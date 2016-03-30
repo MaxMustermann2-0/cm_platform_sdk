@@ -16,7 +16,7 @@
 package org.cyanogenmod.platform.internal;
 
 import android.content.Context;
-import android.content.pm.PackageManager;
+import android.content.Intent;
 import android.os.IBinder;
 import android.os.RemoteCallbackList;
 import android.os.RemoteException;
@@ -344,7 +344,23 @@ public class CMHardwareService extends SystemService implements ThermalUpdateCal
         super(context);
         mContext = context;
         mCmHwImpl = getImpl(context);
-        publishBinderService(CMContextConstants.CM_HARDWARE_SERVICE, mService);
+        if (context.getPackageManager().hasSystemFeature(
+                CMContextConstants.Features.HARDWARE_ABSTRACTION)) {
+            publishBinderService(CMContextConstants.CM_HARDWARE_SERVICE, mService);
+        } else {
+            Log.wtf(TAG, "CM hardware service started by system server but feature xml not" +
+                    " declared. Not publishing binder service!");
+        }
+    }
+
+    @Override
+    public void onBootPhase(int phase) {
+        if (phase == PHASE_BOOT_COMPLETED) {
+            Intent intent = new Intent(cyanogenmod.content.Intent.ACTION_INITIALIZE_CM_HARDWARE);
+            intent.addFlags(Intent.FLAG_RECEIVER_FOREGROUND);
+            mContext.sendBroadcast(intent,
+                    cyanogenmod.platform.Manifest.permission.HARDWARE_ABSTRACTION_ACCESS);
+        }
     }
 
     @Override
