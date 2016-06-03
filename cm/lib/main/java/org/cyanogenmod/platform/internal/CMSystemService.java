@@ -1,5 +1,5 @@
-/*
- * Copyright (C) 2015 The CyanogenMod Project
+/**
+ * Copyright (C) 2016 The CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,16 +14,15 @@
  * limitations under the License.
  */
 
-package cyanogenmod.power;
+package org.cyanogenmod.platform.internal;
 
-import android.content.Intent;
+import android.content.Context;
+import com.android.server.SystemService;
 
-/** {@hide} */
-public interface PerformanceManagerInternal {
+public abstract class CMSystemService extends SystemService {
+    public CMSystemService(Context context) {
+        super(context);
+    }
 
-    void activityResumed(Intent intent);
-
-    void cpuBoost(int duration);
-
-    void launchBoost(int pid, String packageName);
+    public abstract String getFeatureDeclaration();
 }

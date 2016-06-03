@@ -22,19 +22,17 @@ import android.content.Intent;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.IBinder;
-import android.os.PowerManager;
-import android.os.PowerManagerInternal;
 import android.os.Looper;
 import android.os.Message;
+import android.os.PowerManagerInternal;
 import android.os.Process;
-import android.os.SystemProperties;
-import android.text.TextUtils;
 import android.util.Log;
 import android.util.Slog;
 
 import com.android.server.ServiceThread;
 import com.android.server.SystemService;
-import com.android.server.Watchdog;
+
+import java.util.regex.Pattern;
 
 import cyanogenmod.app.CMContextConstants;
 import cyanogenmod.power.IPerformanceManager;
@@ -42,11 +40,8 @@ import cyanogenmod.power.PerformanceManager;
 import cyanogenmod.power.PerformanceManagerInternal;
 import cyanogenmod.providers.CMSettings;
 
-import java.util.concurrent.locks.ReentrantReadWriteLock;
-import java.util.regex.Pattern;
-
 /** @hide */
-public class PerformanceManagerService extends SystemService {
+public class PerformanceManagerService extends CMSystemService {
 
     private static final String TAG = "PerformanceManager";
 
@@ -76,10 +71,10 @@ public class PerformanceManagerService extends SystemService {
     // Max time (microseconds) to allow a CPU boost for
     private static final int MAX_CPU_BOOST_TIME = 5000000;
     private static final boolean DEBUG = false;
-    
+
     public PerformanceManagerService(Context context) {
         super(context);
-        
+
         mContext = context;
 
         String[] activities = context.getResources().getStringArray(
@@ -110,14 +105,13 @@ public class PerformanceManagerService extends SystemService {
     }
 
     @Override
+    public String getFeatureDeclaration() {
+        return CMContextConstants.Features.PERFORMANCE;
+    }
+
+    @Override
     public void onStart() {
-        if (mContext.getPackageManager().hasSystemFeature(
-                CMContextConstants.Features.PERFORMANCE)) {
-            publishBinderService(CMContextConstants.CM_PERFORMANCE_SERVICE, mBinder);
-        } else {
-            Log.wtf(TAG, "CM performance service started by system server but feature xml not" +
-                    " declared. Not publishing binder service!");
-        }
+        publishBinderService(CMContextConstants.CM_PERFORMANCE_SERVICE, mBinder);
         publishLocalService(PerformanceManagerInternal.class, new LocalService());
     }
 
@@ -185,6 +179,10 @@ public class PerformanceManagerService extends SystemService {
                 "setPowerProfileInternal(profile=%d, fromUser=%b)",
                 profile, fromUser));
         }
+        if (mPm == null) {
+            Slog.e(TAG, "System is not ready, dropping profile request");
+            return false;
+        }
         if (profile < 0 || profile > mNumProfiles) {
             Slog.e(TAG, "Invalid profile: " + profile);
             return false;
@@ -233,11 +231,8 @@ public class PerformanceManagerService extends SystemService {
 
         mCurrentProfile = profile;
 
-        mHandler.removeMessages(MSG_CPU_BOOST);
-        mHandler.removeMessages(MSG_LAUNCH_BOOST);
-        mHandler.sendMessage(
-                Message.obtain(mHandler, MSG_SET_PROFILE, profile,
-                               (fromUser ? 1 : 0)));
+        mHandler.obtainMessage(MSG_SET_PROFILE, profile,
+                               (fromUser ? 1 : 0)).sendToTarget();
 
         Binder.restoreCallingIdentity(token);
 
@@ -256,14 +251,19 @@ public class PerformanceManagerService extends SystemService {
     }
 
     private void cpuBoostInternal(int duration) {
+        synchronized (PerformanceManagerService.this) {
+            if (mPm == null) {
+                Slog.e(TAG, "System is not ready, dropping cpu boost request");
+                return;
+            }
+        }
         if (duration > 0 && duration <= MAX_CPU_BOOST_TIME) {
             // Don't send boosts if we're in another power profile
             if (mCurrentProfile == PerformanceManager.PROFILE_POWER_SAVE ||
                     mCurrentProfile == PerformanceManager.PROFILE_HIGH_PERFORMANCE) {
                 return;
             }
-            mHandler.removeMessages(MSG_CPU_BOOST);
-            mHandler.sendMessage(Message.obtain(mHandler, MSG_CPU_BOOST, duration, 0));
+            mHandler.obtainMessage(MSG_CPU_BOOST, duration, 0).sendToTarget();
         } else {
             Slog.e(TAG, "Invalid boost duration: " + duration);
         }
@@ -300,7 +300,7 @@ public class PerformanceManagerService extends SystemService {
 
         /**
          * Boost the CPU
-         * 
+         *
          * @param duration Duration to boost the CPU for, in milliseconds.
          * @hide
          */
@@ -331,17 +331,21 @@ public class PerformanceManagerService extends SystemService {
         public void cpuBoost(int duration) {
             cpuBoostInternal(duration);
         }
-        
+
         @Override
-        public void launchBoost() {
+        public void launchBoost(int pid, String packageName) {
+            synchronized (PerformanceManagerService.this) {
+                if (mPm == null) {
+                    Slog.e(TAG, "System is not ready, dropping launch boost request");
+                    return;
+                }
+            }
             // Don't send boosts if we're in another power profile
             if (mCurrentProfile == PerformanceManager.PROFILE_POWER_SAVE ||
                     mCurrentProfile == PerformanceManager.PROFILE_HIGH_PERFORMANCE) {
                 return;
             }
-            mHandler.removeMessages(MSG_CPU_BOOST);
-            mHandler.removeMessages(MSG_LAUNCH_BOOST);
-            mHandler.sendEmptyMessage(MSG_LAUNCH_BOOST);
+            mHandler.obtainMessage(MSG_LAUNCH_BOOST, pid, 0, packageName).sendToTarget();
         }
 
         @Override
@@ -362,7 +366,7 @@ public class PerformanceManagerService extends SystemService {
     private static final int MSG_CPU_BOOST = 1;
     private static final int MSG_LAUNCH_BOOST = 2;
     private static final int MSG_SET_PROFILE = 3;
-    
+
     /**
      * Handler for asynchronous operations performed by the performance manager.
      */
@@ -378,7 +382,11 @@ public class PerformanceManagerService extends SystemService {
                     mPm.powerHint(POWER_HINT_CPU_BOOST, msg.arg1);
                     break;
                 case MSG_LAUNCH_BOOST:
-                    mPm.powerHint(POWER_HINT_LAUNCH_BOOST, 0);
+                    int pid = msg.arg1;
+                    String packageName = (String) msg.obj;
+                    if (NativeHelper.isNativeLibraryAvailable() && packageName != null) {
+                        native_launchBoost(pid, packageName);
+                    }
                     break;
                 case MSG_SET_PROFILE:
                     mPm.powerHint(POWER_HINT_SET_PROFILE, msg.arg1);
@@ -402,4 +410,6 @@ public class PerformanceManagerService extends SystemService {
                     applyProfile(true);
                 }
             };
+
+    private native final void native_launchBoost(int pid, String packageName);
 }
