@@ -1,5 +1,5 @@
-/**
- * Copyright (C) 2016 The CyanogenMod Project
+/*
+ * Copyright (C) 2015 The CyanogenMod Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,24 +14,6 @@
  * limitations under the License.
  */
 
-package org.cyanogenmod.platform.internal;
+package cyanogenmod.hardware;
 
-import android.content.Context;
-import com.android.server.SystemService;
-
-public abstract class CMSystemService extends SystemService {
-    public CMSystemService(Context context) {
-        super(context);
-    }
-
-    public abstract String getFeatureDeclaration();
-
-
-    /**
-     * Override and return true if the service should be started
-     * before the device is decrypted.
-     */
-    public boolean isCoreService() {
-        return true;
-    }
-}
+parcelable HSIC;
